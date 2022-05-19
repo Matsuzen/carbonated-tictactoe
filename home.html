@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Chat Example</title>
+<script type="text/javascript">
+window.onload = function () {
+    var conn;
+    var chat = document.querySelector(".chat");
+    var username;
+
+    const gameTab = document.querySelector(".game");
+    const gameListTab = document.querySelector(".game-list");
+    const promptForm = document.querySelector(".prompt-form");
+    const promptValue = document.querySelector(".prompt-form .prompt-value");
+
+    let gameState = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0]
+    ]
+
+    //User's piece X / Y
+    let piece; 
+
+    let currentTurn; 
+
+    makeGrid()
+    
+    //Possible actions received from server
+    var actions = {
+        chatMessage: chatMessage,
+        gameLobbyUpdate: gameLobbyUpdate,
+        toggleGameTab: toggleGameTab,
+        turnStart: turnStart,
+        gameOver: gameOver,
+        draw: draw,
+        displayGameList: displayGameList
+    }
+
+
+    function chatMessage(message) {
+        var item = document.createElement("div");
+        item.innerText = message.username + ": " + message.chatMessage
+        appendChat(item);
+    }
+
+    function gameLobbyUpdate(data) {
+        // Less than 2 players, add the game to the list 
+        if(data.playerCount != 2) {
+            displayGame(data)
+        }
+        // Remove the game from the list
+        else if(data.playerCount == 2) {
+            let gameToRemove = document.querySelector(`#game-list-game-${data.gameId}`)
+            gameToRemove.parentElement.removeChild(gameToRemove)
+        }
+
+    }
+
+    function toggleGameTab(data) {
+        const { toggleGameTab, gameName } = data;
+
+        if(toggleGameTab) {
+            gameTab.style.display = "flex";
+            gameListTab.style.display = "none";
+
+            document.querySelector(".game-title").textContent = gameName;
+        }
+        else {
+            gameTab.style.display = "none";
+            gameListTab.style.display = "flex";
+        }
+    }
+
+    function turnStart(data) {
+        currentTurn = data.currentTurn
+        document.querySelector(".game-current-turn").textContent = `It is now ${data.currentTurn}'s turn`;
+
+        document.querySelector(".game-board").style.cursor = data.currenTurn == username ? "cursor" : "";
+
+        //Initialize the user's piece
+        if(!piece) {
+            piece = data.currentTurn == username ? "X" : "O";
+        }
+
+        syncGameState(data.gameState);
+    }
+
+    function gameOver(data) {
+        syncGameState(data.gameState);
+        document.querySelector(".game-current-turn").textContent = `The game is over. ${data.winner} won!`;
+    }
+
+    function draw(data) {
+        syncGameState(data.gameState);
+        document.querySelector(".game-current-turn").textContent = `The game ended in a draw`;
+    }
+
+    function displayGameList(data) {
+        data.gameList.forEach(displayGame)
+    }
+
+    //Display a new game in the game list
+    function displayGame({gameId, gameName, gameCreator}) {
+        let newGame = document.querySelector(".game-list-item").cloneNode(true);
+        newGame.querySelector(".game-list-name").textContent = gameName;
+        newGame.querySelector(".game-list-creator").textContent = gameCreator;
+
+        let joinButton = newGame.querySelector(".game-list-join");
+        joinButton.textContent = "Join game";
+        joinButton.classList.toggle("displaynone");
+        
+        newGame.setAttribute("id", `game-list-game-${gameId}`);
+
+        newGame.querySelector(".game-list-join").onclick = function() {
+            joinGame(gameId);
+        }
+
+        document.querySelector(".game-list").appendChild(newGame);
+    }
+
+    //Make sure game state is the same as the server
+    function syncGameState(newGameState) {
+        gameState = newGameState
+
+        for(let y = 0; y < newGameState.length; y++) {
+            for(let x = 0; x < newGameState.length; x++) {
+                if(newGameState[y][x] == 0) {
+                    continue
+                }
+                const piece = newGameState[y][x] == 1 ? "X" : "O";
+                document.querySelector(`.box[data-y="${y}"][data-x="${x}"]`).textContent = piece;
+            }
+        } 
+    }
+
+    function appendChat(item) {
+        var doScroll = chat.scrollTop > chat.scrollHeight - chat.clientHeight - 1;
+        chat.appendChild(item);
+        if (doScroll) {
+            chat.scrollTop = chat.scrollHeight - chat.clientHeight;
+        }
+    }
+
+    function makeGrid() {
+        var f = document.createDocumentFragment()
+        
+        for (var i = 0; i < 3; i++) {
+            var row = document.createElement('div');
+            row.className = "row";
+            for (var j = 0; j < 3; j++) {
+                var box = document.createElement('div');
+                box.className = "box";
+                box.setAttribute("data-y", i);
+                box.setAttribute("data-x", j);
+                row.appendChild(box);
+            }                
+            f.appendChild(row);
+        }
+
+        const grid = document.querySelector('.game-board .grid');
+        grid.appendChild(f)
+        grid.onclick = placePiece;
+    }
+
+    document.getElementById("form").onsubmit = function() {
+        sendChatMessage()
+        return false
+    };
+
+    function sendChatMessage() {
+        if(!conn) {
+            return false;
+        }
+
+        var message = document.querySelector("#message");
+        if(!message.value) {
+            return false;
+        }
+
+        var jsonData = {
+            chatMessage: message.value
+        }
+
+        conn.send(JSON.stringify(jsonData));
+        message.value = "";
+        return false;
+    }
+
+    promptForm.onsubmit = function() {
+        setUsername();
+        return false;
+    }
+
+    function togglePrompt(display, promptText) {
+        promptValue.value = ""
+        document.querySelector(".prompt-text").textContent = promptText;
+        document.querySelector(".prompt").style.display = display
+    }
+
+    function setUsername() {
+        if(!conn) {
+            return false;
+        }
+
+        var usernameValue = promptValue.value
+
+        if(!usernameValue) {
+            return false
+        }
+
+        var jsonData = {
+            setUsername: usernameValue
+        }
+
+        conn.send(JSON.stringify(jsonData))
+
+        username = usernameValue
+
+        togglePrompt("none", "");
+        promptForm.onsubmit = null;
+
+        return false;
+    }
+
+    const createGameButton = document.querySelector(".game-list-create");
+    createGameButton.onclick = function() {
+        togglePrompt("flex", "Enter a game name");
+        promptForm.onsubmit = function() {
+            createGame()
+            return false
+        }
+    }
+
+    function createGame() {
+        if(!conn) {
+            return false;
+        }
+
+        const gameName = promptValue.value;
+
+        var jsonData = {
+            createGame: true,
+            gameName
+        }
+        conn.send(JSON.stringify(jsonData));
+
+        togglePrompt("none", "");
+        promptForm.onsubmit = null;
+
+        return false;
+    }
+
+    function joinGame(gameId) {
+        if(!conn) {
+            return false;
+        }
+        const jsonData = {
+            gameId: gameId
+        }
+        conn.send(JSON.stringify(jsonData));
+    }
+
+    function placePiece(e) {
+        if(username != currentTurn) {
+            return;
+        }
+        const jsonData = {
+            playerAction: {
+                x: parseInt(e.target.getAttribute("data-x")),
+                y: parseInt(e.target.getAttribute("data-y")),
+            }
+        }
+        conn.send(JSON.stringify(jsonData));
+    }
+
+    if (window["WebSocket"]) {
+        conn = new WebSocket("ws://" + document.location.host + "/ws");
+        conn.onclose = function (event) {
+            var item = document.createElement("div");
+            item.innerHTML = "<b>Connection closed.</b>";
+            appendChat(item);
+        };
+        
+        conn.onmessage = function (event) {
+            var data = JSON.parse(event.data)
+            var action = actions[data.action]
+
+            console.log(data)
+
+            if(!action) {
+                return
+            }
+
+            action(data)
+        };
+    } else {
+        var item = document.createElement("div");
+        item.innerHTML = "<b>Your browser does not support WebSockets.</b>";
+        appendChat(item);
+    }
+};
+</script>
+<style type="text/css">
+html {
+    overflow: hidden;
+}
+
+body {
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: gray;
+}
+
+.wrapper {
+    background: white;
+    display: flex;
+    margin: 0;
+    padding: 0.5em 0.5em 0.5em 0.5em;
+    position: absolute;
+    top: 0.5em;
+    left: 0.5em;
+    right: 0.5em;
+    bottom: 3em;
+    overflow: auto;
+}
+
+#form {
+    padding: 0 0.5em 0 0.5em;
+    margin: 0;
+    position: absolute;
+    bottom: 1em;
+    left: 0px;
+    width: 100%;
+    overflow: hidden;
+}
+
+.wrapper .chat, .wrapper .game-wrapper {
+    width: 50%
+}
+
+.game {
+    align-items: center;
+    display: none;
+    flex-direction: column;
+}
+
+.game-board {
+    display: flex;
+    justify-content: center;
+}
+
+.box {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #9E9E9E;
+    border: black 1px solid;
+    font-size: 24px;
+    width: 180px;
+    height: 180px;
+    margin: 0 auto;
+    margin-top: 0;
+    float: left;
+}
+
+.game-list {
+    width: 100%!important;
+}
+
+.game-list-item {
+    display: flex
+}
+
+.game-list-item div {
+    margin-right: 32px;
+}
+
+.prompt {
+    display: flex;
+    position: absolute;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.25);
+    top:0;
+    bottom:0;
+    left:0;
+    right:0;
+    z-index:1000;
+}
+
+.prompt-form {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction:column;
+    width: 20%;
+    height: 20%;
+    background: white;
+}
+
+.prompt-text {
+    margin: 8px 0;
+}
+
+.displaynone {
+    display: none
+}
+
+</style>
+</head>
+<body>
+<div class="prompt">
+    <form class="prompt-form">
+        <div class="prompt-text">Enter your username</div>
+        <div>
+            <input type="text" class="prompt-value" autofocus>
+            <input type="submit" value="Send">
+        </div>
+    </form>
+</div>
+<div class="wrapper">
+    <div class="chat"></div>
+    <div class="game-wrapper">
+        <!-- Visible when the user hasn,t joined a game yet -->
+        <div class="game-list">
+            <div>Available game list</div>
+            <button class="game-list-create">Create Game</button>
+            <!-- Copied and appended in the list with the text content of each item replaced beforehang -->
+            <div class="game-list-item">
+                <div class="game-list-name">Game name</div>
+                <div class="game-list-creator">Creator</div>
+                <button class="game-list-join displaynone"></button>
+            </div>
+        </div>
+        <div class="game">
+            <h2 class="game-title"></h2>
+            <div class="game-current-turn"></div>
+            <div class="game-board">
+                <div class="grid"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<form id="form">
+    <input type="submit" value="Send" />
+    <input type="text" id="message" size="64" autofocus />
+</form>
+</body>
